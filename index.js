@@ -33,9 +33,16 @@ const client = new Client({
     ]
 });
 
-// Probe Bot (Nick bulucu için görünmez bot)
-const probeClient = new Client({
-    intents: [GatewayIntentBits.Guilds]
+// Birden fazla probe botu destekleyen havuz (İleride artırabilirsin)
+const probeTokens = [
+    process.env.PROBE_TOKEN,
+    process.env.PROBE_TOKEN_2 // İsteğe bağlı 2. token (.env dosyasına ekleyebilirsin)
+].filter(Boolean);
+
+const probeClients = probeTokens.map(token => {
+    const pClient = new Client({ intents: [GatewayIntentBits.Guilds] });
+    pClient.login(token).catch(err => console.log('Probe bot giriş hatası:', err.message));
+    return pClient;
 });
 
 // Devam eden aramaları çakışmayı önlemek için tutuyoruz
@@ -57,10 +64,6 @@ if (fs.existsSync(commandsPath)) {
 
 client.once('ready', () => {
     console.log(`🤖 Project Swisty — Panel Bot: ${client.user.tag} aktif ve hazır!`);
-});
-
-probeClient.once('ready', () => {
-    console.log(`👻 Project Swisty — Probe Bot: ${probeClient.user.tag} arka planda hazır (görünmez).`);
 });
 
 // Komut Dinleyicisi (!nickpanel vb.)
@@ -96,16 +99,24 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function findAvailableNick(proberClient, length, maxAttempts = 25, delayMs = 1500) {
+// Tüm probe botlar arasında dönerek rate-limit'i bypass eden arama motoru
+async function findAvailableNick(clientsArray, length, maxAttempts = 30, delayMs = 2000) {
+    if (clientsArray.length === 0) {
+        throw new Error("Hiç aktif probe bot bulunamadı!");
+    }
+
+    let currentProbeIndex = 0;
+
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const candidate = randomCandidate(length);
+        const activeProber = clientsArray[currentProbeIndex];
+
         try {
-            await proberClient.user.setUsername(candidate);
+            await activeProber.user.setUsername(candidate);
             return { success: true, nick: candidate, attempts: attempt };
         } catch (err) {
-            console.log(`[DENEME ${attempt}] "${candidate}" başarısız ->`, {
+            console.log(`[DENEME ${attempt} | Bot #${currentProbeIndex + 1}] "${candidate}" başarısız ->`, {
                 message: err?.message,
-                code: err?.code,
                 status: err?.status
             });
 
@@ -116,7 +127,12 @@ async function findAvailableNick(proberClient, length, maxAttempts = 25, delayMs
                 msg.includes('too fast') ||
                 msg.includes('rate limit');
 
-            if (isRateLimited) {
+            // Eğer rate-limit yediyse ve birden fazla botumuz varsa, sıradaki diğer probe bota geç!
+            if (isRateLimited && clientsArray.length > 1) {
+                console.log(`⚠️ Bot #${currentProbeIndex + 1} rate-limit yedi, diğer probe bota geçiliyor...`);
+                currentProbeIndex = (currentProbeIndex + 1) % clientsArray.length;
+            } else if (isRateLimited && clientsArray.length === 1) {
+                // Tek bot varsa ve rate-limit yediyse mecburen durur veya bekler
                 return { success: false, reason: 'rate_limited', attempts: attempt };
             }
         }
@@ -125,7 +141,7 @@ async function findAvailableNick(proberClient, length, maxAttempts = 25, delayMs
     return { success: false, reason: 'not_found', attempts: maxAttempts };
 }
 
-// Panel Butonları ve Modal Yönetimi (Sadece Nick Arama)
+// Panel Butonları ve Modal Yönetimi
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton()) {
         if (interaction.customId === 'swisty_nick_ara') {
@@ -174,7 +190,7 @@ client.on('interactionCreate', async (interaction) => {
             activeSearches.add(client.user.id);
 
             try {
-                const result = await findAvailableNick(probeClient, length);
+                const result = await findAvailableNick(probeClients, length);
 
                 if (result.success) {
                     try {
@@ -188,9 +204,9 @@ client.on('interactionCreate', async (interaction) => {
                             flags: [64]
                         });
                     }
-                } else if (result.reason === 'rate_limited') {
+                } else if (result.reason === 'rate_limit') {
                     await interaction.followUp({
-                        content: '⛔ Discord rate-limit uyguladı, çok fazla deneme yapıldı. Lütfen bir süre sonra tekrar dene.',
+                        content: '⛔ Discord rate-limit uyguladı. Lütfen bir süre sonra tekrar dene.',
                         flags: [64]
                     });
                 } else {
@@ -206,6 +222,5 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Bot Girişleri
+// Bot Girişi
 client.login(process.env.DISCORD_TOKEN);
-probeClient.login(process.env.PROBE_TOKEN);
