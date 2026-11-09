@@ -3,17 +3,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('Project Swisty 7/24 Ses Sistemi Aktif ve Çalışıyor!');
+    res.send('Project Swisty 7/24 Ses ve Nick Sistemi Aktif ve Çalışıyor!');
 });
 
 app.listen(PORT, () => {
     console.log(`🌐 Web sunucusu ${PORT} portunda çalışıyor.`);
 });
 
-// --- Bundan sonra mevcut Discord bot kodların gelecek ---
-require('dotenv').config();
-const fs = require('fs');
-// ... (diğer require ve kodların)
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -26,38 +22,27 @@ const {
     TextInputStyle,
     ActionRowBuilder
 } = require('discord.js');
+const { Client: SelfClient } = require('discord.js-selfbot-v13');
+const { joinVoiceChannel, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 
-// Project Swisty — Nick Bulucu
-// Bu sistem İKİ ayrı bot hesabı kullanır:
-//   1) PANEL BOT  -> sunucuda görünen, adı ASLA değişmeyen bot. Komutları
-//      ve DM gönderimini bu yönetir.
-//   2) PROBE BOT  -> hiçbir sunucuya eklenmeyen, tamamen arka planda
-//      çalışan "görünmez" ikinci bot. İsim deneme (rename) işini SADECE
-//      bu bot yapar. Hiçbir sunucuda üyesi olmadığı için kimse onun adının
-//      değiştiğini görmez. Bulduğu sonucu aynı process içinde (fonksiyon
-//      dönüşüyle) panel bota iletir; panel bot da sonucu SADECE isteği
-//      yapan kullanıcıya DM olarak gönderir.
-//
-// Not: Discord'un resmi API'sinde "bu isim boşta mı" diye sorup almadan
-// kontrol edebileceğin bir uç nokta yok. Kontrolün tek yolu o ismi
-// gerçekten almayı denemek. Bu yüzden MUTLAKA bir hesabın adı değişiyor —
-// biz bunu sadece kimsenin görmediği, sunucusuz bir hesaba (probe bot)
-// yükleyerek görünmez hale getiriyoruz.
+// Ana Panel Botu
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildVoiceStates
     ]
 });
 
-// Probe bot: minimal intent yeterli, hiçbir sunucuya davet edilmemeli.
+// Probe Bot (Nick bulucu için görünmez bot)
 const probeClient = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// Devam eden aramaları (çakışmayı önlemek için) burada tutuyoruz
+// Sese sokulan aktif kullanıcı oturumlarını ve arama durumlarını hafızada tutuyoruz
+const activeVoiceSessions = new Map();
 const activeSearches = new Set();
 
 // Komut Yükleyicisi
@@ -80,10 +65,9 @@ client.once('ready', () => {
 
 probeClient.once('ready', () => {
     console.log(`👻 Project Swisty — Probe Bot: ${probeClient.user.tag} arka planda hazır (görünmez).`);
-    console.log(`⚠️  Bu botu HİÇBİR sunucuya eklemediğinden emin ol, yoksa isim değişiklikleri o sunucuda görünür.`);
 });
 
-// Komut Dinleyicisi (!nickpanel)
+// Komut Dinleyicisi (!sespanel, !nickpanel vb.)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
     if (!message.content.startsWith('!')) return;
@@ -101,7 +85,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// İzin verilen karakterler: discord kullanıcı adı kuralına uygun (küçük harf + rakam)
+// Nick Bulucu Yardımcı Fonksiyonları
 const CHARSET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 function randomCandidate(length) {
@@ -116,33 +100,19 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Verilen uzunlukta boşta olan ilk nicki arar.
-// Discord'un resmi kullanıcı adı değiştirme uç noktasını (client.user.setUsername)
-// kullanır: ad doluysa hata döner, boşsa değişim başarılı olur.
-// NOT: Discord, kullanıcı adı değişikliklerine sıkı rate-limit uygular
-// (hesap başına belirli bir sürede sınırlı sayıda değişim). Bu yüzden
-// maxAttempts ve denemeler arası bekleme süresi makul tutulmalı.
 async function findAvailableNick(proberClient, length, maxAttempts = 25, delayMs = 1500) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const candidate = randomCandidate(length);
         try {
-            // Deneme/alma işlemi SADECE probe bot üzerinde yapılır,
-            // panel botun adı hiçbir zaman değişmez.
             await proberClient.user.setUsername(candidate);
-            // Başarılı olduysa bu isim artık boşta değil, bot bunu aldı.
             return { success: true, nick: candidate, attempts: attempt };
         } catch (err) {
-            // Gerçek hatayı konsola yazıyoruz ki rate-limit mi yoksa
-            // başka bir şey mi olduğunu görelim.
             console.log(`[DENEME ${attempt}] "${candidate}" başarısız ->`, {
                 message: err?.message,
                 code: err?.code,
-                status: err?.status,
-                rawError: err?.rawError
+                status: err?.status
             });
 
-            // Discord kullanıcı adı rate-limitini genelde 400 (Invalid Form Body)
-            // + "too fast" içeren bir mesajla döndürür, 429 ile değil.
             const msg = (err?.message || '').toLowerCase();
             const isRateLimited =
                 err?.status === 429 ||
@@ -159,9 +129,55 @@ async function findAvailableNick(proberClient, length, maxAttempts = 25, delayMs
     return { success: false, reason: 'not_found', attempts: maxAttempts };
 }
 
-// Panel Butonları ve Modal Yönetimi
+// Panel Butonları ve Modal Yönetimi (Hem 7/24 Ses hem Nick Arama)
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton()) {
+        // 1) 7/24 Ses Paneli Butonları
+        if (interaction.customId === 'swisty_bot_sese_kur') {
+            const modal = new ModalBuilder()
+                .setCustomId('modal_bot_sese_kur')
+                .setTitle('Kullanıcı Hesabını Sese Bırak');
+
+            const tokenInput = new TextInputBuilder()
+                .setCustomId('bot_tokens')
+                .setLabel('Hesap Token(leri) - Alt alta yazın')
+                .setStyle(TextInputStyle.Paragraph)
+                .setPlaceholder('Kullanıcı tokenlerini buraya yapıştırın')
+                .setRequired(true);
+
+            const channelInput = new TextInputBuilder()
+                .setCustomId('voice_channel_id')
+                .setLabel('Ses Kanal ID')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('Girilecek ses kanalının IDsi')
+                .setRequired(true);
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(tokenInput),
+                new ActionRowBuilder().addComponents(channelInput)
+            );
+
+            await interaction.showModal(modal);
+        }
+
+        if (interaction.customId === 'swisty_aktif_botlar') {
+            await interaction.reply({ content: `📊 Sistemde sese bağlı aktif hesap sayısı: **${activeVoiceSessions.size}**`, flags: [64] });
+        }
+
+        if (interaction.customId === 'swisty_baglantiyi_kes') {
+            let count = 0;
+            for (const [token, data] of activeVoiceSessions.entries()) {
+                try {
+                    data.connection.destroy();
+                    data.client.destroy();
+                    count++;
+                } catch (e) {}
+            }
+            activeVoiceSessions.clear();
+            await interaction.reply({ content: `🔴 Toplam **${count}** adet hesabın ses bağlantısı sonlandırıldı.`, flags: [64] });
+        }
+
+        // 2) Nick Bulucu Butonu
         if (interaction.customId === 'swisty_nick_ara') {
             const modal = new ModalBuilder()
                 .setCustomId('modal_nick_ara')
@@ -183,50 +199,91 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
+        // Ses Paneli Form Gönderimi
+        if (interaction.customId === 'modal_bot_sese_kur') {
+            const tokenText = interaction.fields.getTextInputValue('bot_tokens');
+            const channelId = interaction.fields.getTextInputValue('voice_channel_id');
+            const guild = interaction.guild;
+
+            const targetChannel = guild.channels.cache.get(channelId);
+            if (!targetChannel) {
+                return await interaction.reply({ content: '❌ Hata: Belirttiğiniz ID geçerli bir ses kanalı değil!', flags: [64] });
+            }
+
+            const tokens = tokenText.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+
+            if (tokens.length === 0) {
+                return await interaction.reply({ content: '❌ Geçerli bir token bulunamadı!', flags: [64] });
+            }
+
+            await interaction.reply({ content: `⏳ Girilen **${tokens.length}** adet kullanıcı hesabı <#${channelId}> kanalına bağlanıyor...`, flags: [64] });
+
+            let successCount = 0;
+
+            for (const token of tokens) {
+                try {
+                    const userClient = new SelfClient({
+                        checkUpdate: false,
+                        intents: []
+                    });
+
+                    userClient.once('ready', async () => {
+                        try {
+                            setTimeout(async () => {
+                                const connection = joinVoiceChannel({
+                                    channelId: targetChannel.id,
+                                    guildId: guild.id,
+                                    adapterCreator: targetChannel.guild.voiceAdapterCreator,
+                                    selfDeaf: true,
+                                    selfMute: true
+                                });
+
+                                await entersState(connection, VoiceConnectionStatus.Ready, 20 * 1000);
+                                console.log(`[7/24 KULLANICI SES] ${userClient.user.tag} sese başarıyla bağlandı!`);
+                                
+                                activeVoiceSessions.set(token, { client: userClient, connection });
+                            }, 2000);
+                        } catch (err) {
+                            console.error(`[HATA] Kullanıcı sese bağlanamadı:`, err.message);
+                        }
+                    });
+
+                    await userClient.login(token);
+                    successCount++;
+                } catch (err) {
+                    console.error('Kullanıcı token giriş hatası:', err.message);
+                }
+            }
+
+            await interaction.editReply({ content: `✅ İşlem tamamlandı! Toplam **${successCount}** kullanıcı hesabı sese yerleştirildi.` });
+        }
+
+        // Nick Bulucu Form Gönderimi
         if (interaction.customId === 'modal_nick_ara') {
             const raw = interaction.fields.getTextInputValue('nick_length').trim();
             const length = parseInt(raw, 10);
 
             if (isNaN(length)) {
-                return interaction.reply({
-                    content: '❌ Lütfen sadece sayı gir (örn. 6).',
-                    flags: [64]
-                });
+                return interaction.reply({ content: '❌ Lütfen sadece sayı gir (örn. 6).', flags: [64] });
             }
 
             if (length < 4) {
-                return interaction.reply({
-                    content: '⚠️ Minimum **4** karakter girmelisin. 1-3 arası uzunluklar aranmaz, sadece uyarı verilir.',
-                    flags: [64]
-                });
+                return interaction.reply({ content: '⚠️ Minimum **4** karakter girmelisin.', flags: [64] });
             }
 
             if (length > 32) {
-                return interaction.reply({
-                    content: '⚠️ Maksimum **32** karakter girebilirsin.',
-                    flags: [64]
-                });
+                return interaction.reply({ content: '⚠️ Maksimum **32** karakter girebilirsin.', flags: [64] });
             }
 
             if (activeSearches.has(client.user.id)) {
-                return interaction.reply({
-                    content: '⏳ Sistem şu anda başka bir arama yapıyor, lütfen biraz sonra tekrar dene.',
-                    flags: [64]
-                });
+                return interaction.reply({ content: '⏳ Sistem şu anda başka bir arama yapıyor, lütfen biraz sonra tekrar dene.', flags: [64] });
             }
 
-            await interaction.reply({
-                content: `🔎 **${length}** karakterlik boşta bir nick aranıyor... Bulunca sana DM olarak gelecek.`,
-                flags: [64]
-            });
+            await interaction.reply({ content: `🔎 **${length}** karakterlik boşta bir nick aranıyor... Bulunca sana DM olarak gelecek.`, flags: [64] });
 
             activeSearches.add(client.user.id);
 
             try {
-                // Not: findAvailableNick burada PROBE bot üzerinde çalışır (görünmez),
-                // DM'i ise PANEL bot (interaction.user.send) gönderir — bu yüzden
-                // sonuç sadece isteği yapan kullanıcıya ulaşır, sunucuda kimse
-                // probe botun adının değiştiğini görmez.
                 const result = await findAvailableNick(probeClient, length);
 
                 if (result.success) {
@@ -248,7 +305,7 @@ client.on('interactionCreate', async (interaction) => {
                     });
                 } else {
                     await interaction.followUp({
-                        content: `❌ ${result.attempts} denemede **${length}** karakterlik boşta bir nick bulunamadı. Tekrar deneyebilirsin.`,
+                        content: `❌ ${result.attempts} denemede **${length}** karakterlik boşta bir nick bulunamadı.`,
                         flags: [64]
                     });
                 }
@@ -259,5 +316,6 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// Bot Girişleri (Render ve `.env` ayarları için)
 client.login(process.env.DISCORD_TOKEN);
 probeClient.login(process.env.PROBE_TOKEN);
