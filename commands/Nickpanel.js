@@ -13,20 +13,20 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setColor('#113ccf')
             .setDescription(
-                `# 🔺 Project Swisty Nick Bulucu\n` +
+                `# <:olympyx_ay:1568374578206744636> Project Swisty Nick Bulucu\n` +
                 `| 🟢 **Durum:** \`Aktif / Hazır\`\n\n` +
                 `───────────────────────────────────\n\n` +
-                `### 💙 Bu Araç Ne Yapar?\n` +
+                `### <a:zoktay:1568374689510727680> Bu Araç Ne Yapar?\n` +
                 `Kaç harfli bir Discord nick istediğini söyle, sistem Discord'un resmi API'sini kullanarak o uzunlukta **boşta olan ilk nick'i** bulur ve sana **DM** olarak gönderir.\n\n` +
-                `### ➕ Nasıl Kullanılır?\n` +
-                `> ⚞ Aşağıdaki **Nick Ara** butonuna bas.\n` +
-                `> ⚞ Kaç karakterlik nick istediğini gir — örn. \`6\`\n` +
-                `> ⚞ Sistem o uzunlukta boş bir nick bulana kadar tarar.\n` +
-                `> ⚞ Bulduğu ilk müsait nick sana **DM** olarak gelir.\n\n` +
-                `### 💥 Notlar\n` +
-                `> ⚞ Minimum **4**, maksimum **32** karakter.\n` +
-                `> ⚞ 1-3 arası girersen seni uyarır, aramaz.\n` +
-                `> ⚞ Nick bulununca sistem hemen durur, sistemi yormaz.\n\n` +
+                `### <:plus:1568374599043780619> Nasıl Kullanılır?\n` +
+                `> <a:sagaok:1568374522779017477> Aşağıdaki **Nick Ara** butonuna bas.\n` +
+                `> <a:sagaok:1568374522779017477> Kaç karakterlik nick istediğini gir — örn. \`6\`\n` +
+                `> <a:sagaok:1568374522779017477> Sistem o uzunlukta boş bir nick bulana kadar tarar.\n` +
+                `> <a:sagaok:1568374522779017477> Bulduğu ilk müsait nick sana **DM** olarak gelir.\n\n` +
+                `### <:kizgin:1568374761602687017> Notlar\n` +
+                `> <a:sagaok:1568374522779017477> Minimum **4**, maksimum **32** karakter.\n` +
+                `> <a:sagaok:1568374522779017477> 1-3 arası girersen seni uyarır, aramaz.\n` +
+                `> <a:sagaok:1568374522779017477> Nick bulununca sistem hemen durur, sistemi yormaz.\n\n` +
                 `───────────────────────────────────\n` +
                 `project swisty altyapısı`
             );
