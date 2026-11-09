@@ -9,7 +9,7 @@ module.exports = {
             return message.reply({ content: '❌ Bu komutu kullanabilmek için **Yönetici** yetkisine sahip olmalısın!', flags: [64] });
         }
 
-        // Gönderdiğin görseldeki tasarıma birebir uyarlanmış dev başlık ve içerik
+        // Özelleştirilmiş emojili ve şık tasarım
         const embed = new EmbedBuilder()
             .setColor('#113ccf')
             .setDescription(
