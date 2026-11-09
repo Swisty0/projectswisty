@@ -23,7 +23,7 @@ const {
     ActionRowBuilder
 } = require('discord.js');
 
-// Ana Panel Botu
+// Tek ve Ana Bot İstemcisi
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -31,18 +31,6 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
     ]
-});
-
-// Birden fazla probe botu destekleyen havuz (İleride artırabilirsin)
-const probeTokens = [
-    process.env.PROBE_TOKEN,
-    process.env.PROBE_TOKEN_2 // İsteğe bağlı 2. token (.env dosyasına ekleyebilirsin)
-].filter(Boolean);
-
-const probeClients = probeTokens.map(token => {
-    const pClient = new Client({ intents: [GatewayIntentBits.Guilds] });
-    pClient.login(token).catch(err => console.log('Probe bot giriş hatası:', err.message));
-    return pClient;
 });
 
 // Devam eden aramaları çakışmayı önlemek için tutuyoruz
@@ -63,7 +51,13 @@ if (fs.existsSync(commandsPath)) {
 }
 
 client.once('ready', () => {
-    console.log(`🤖 Project Swisty — Panel Bot: ${client.user.tag} aktif ve hazır!`);
+    console.log(`🤖 Project Swisty — Bot: ${client.user.tag} aktif ve hazır!`);
+    
+    // Botun Discord'da çevrimiçi görünmesini sağlar
+    client.user.setPresence({
+        activities: [{ name: 'Project Swisty Nick Bulucu', type: 3 }],
+        status: 'online',
+    });
 });
 
 // Komut Dinleyicisi (!nickpanel vb.)
@@ -99,23 +93,14 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Tüm probe botlar arasında dönerek rate-limit'i bypass eden arama motoru
-async function findAvailableNick(clientsArray, length, maxAttempts = 30, delayMs = 2000) {
-    if (clientsArray.length === 0) {
-        throw new Error("Hiç aktif probe bot bulunamadı!");
-    }
-
-    let currentProbeIndex = 0;
-
+async function findAvailableNick(botClient, length, maxAttempts = 20, delayMs = 2500) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const candidate = randomCandidate(length);
-        const activeProber = clientsArray[currentProbeIndex];
-
         try {
-            await activeProber.user.setUsername(candidate);
+            await botClient.user.setUsername(candidate);
             return { success: true, nick: candidate, attempts: attempt };
         } catch (err) {
-            console.log(`[DENEME ${attempt} | Bot #${currentProbeIndex + 1}] "${candidate}" başarısız ->`, {
+            console.log(`[DENEME ${attempt}] "${candidate}" başarısız ->`, {
                 message: err?.message,
                 status: err?.status
             });
@@ -127,12 +112,7 @@ async function findAvailableNick(clientsArray, length, maxAttempts = 30, delayMs
                 msg.includes('too fast') ||
                 msg.includes('rate limit');
 
-            // Eğer rate-limit yediyse ve birden fazla botumuz varsa, sıradaki diğer probe bota geç!
-            if (isRateLimited && clientsArray.length > 1) {
-                console.log(`⚠️ Bot #${currentProbeIndex + 1} rate-limit yedi, diğer probe bota geçiliyor...`);
-                currentProbeIndex = (currentProbeIndex + 1) % clientsArray.length;
-            } else if (isRateLimited && clientsArray.length === 1) {
-                // Tek bot varsa ve rate-limit yediyse mecburen durur veya bekler
+            if (isRateLimited) {
                 return { success: false, reason: 'rate_limited', attempts: attempt };
             }
         }
@@ -190,7 +170,8 @@ client.on('interactionCreate', async (interaction) => {
             activeSearches.add(client.user.id);
 
             try {
-                const result = await findAvailableNick(probeClients, length);
+                // Kendi botumuz üzerinden arama yapıyoruz
+                const result = await findAvailableNick(client, length);
 
                 if (result.success) {
                     try {
@@ -204,7 +185,7 @@ client.on('interactionCreate', async (interaction) => {
                             flags: [64]
                         });
                     }
-                } else if (result.reason === 'rate_limit') {
+                } else if (result.reason === 'rate_limited') {
                     await interaction.followUp({
                         content: '⛔ Discord rate-limit uyguladı. Lütfen bir süre sonra tekrar dene.',
                         flags: [64]
@@ -222,22 +203,5 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Bot Girişi
+// Tek Bot Girişi (Render'da sadece DISCORD_TOKEN yeterli olacak)
 client.login(process.env.DISCORD_TOKEN);
-// Discord istemcisi bağlantı kopmalarını ve hatalarını yakalama
-client.on('shardDisconnect', (event, id) => {
-    console.log(`⚠️ Uyarı: Bot bağlantısı kesildi (Shard ID: ${id}). Yeniden bağlanmaya çalışılıyor...`);
-});
-
-client.on('shardReconnecting', (id) => {
-    console.log(`🔄 Bilgi: Bot yeniden bağlanıyor... (Shard ID: ${id})`);
-});
-
-// Yakalanmayan hataların botu tamamen çökertmesini engellemek için
-process.on('unhandledRejection', error => {
-    console.error('Beklenmeyen Promise Hatası:', error);
-});
-
-process.on('uncaughtException', error => {
-    console.error('Kritik Hata (Uncaught Exception):', error);
-});
