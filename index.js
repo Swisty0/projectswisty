@@ -3,7 +3,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('Project Swisty 7/24 Ses ve Nick Sistemi Aktif ve Çalışıyor!');
+    res.send('Project Swisty Nick Sistemi Aktif ve Çalışıyor!');
 });
 
 app.listen(PORT, () => {
@@ -22,8 +22,6 @@ const {
     TextInputStyle,
     ActionRowBuilder
 } = require('discord.js');
-const { Client: SelfClient } = require('discord.js-selfbot-v13');
-const { joinVoiceChannel, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 
 // Ana Panel Botu
 const client = new Client({
@@ -31,8 +29,7 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.MessageContent
     ]
 });
 
@@ -41,8 +38,7 @@ const probeClient = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// Sese sokulan aktif kullanıcı oturumlarını ve arama durumlarını hafızada tutuyoruz
-const activeVoiceSessions = new Map();
+// Devam eden aramaları çakışmayı önlemek için tutuyoruz
 const activeSearches = new Set();
 
 // Komut Yükleyicisi
@@ -67,7 +63,7 @@ probeClient.once('ready', () => {
     console.log(`👻 Project Swisty — Probe Bot: ${probeClient.user.tag} arka planda hazır (görünmez).`);
 });
 
-// Komut Dinleyicisi (!sespanel, !nickpanel vb.)
+// Komut Dinleyicisi (!nickpanel vb.)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
     if (!message.content.startsWith('!')) return;
@@ -129,55 +125,9 @@ async function findAvailableNick(proberClient, length, maxAttempts = 25, delayMs
     return { success: false, reason: 'not_found', attempts: maxAttempts };
 }
 
-// Panel Butonları ve Modal Yönetimi (Hem 7/24 Ses hem Nick Arama)
+// Panel Butonları ve Modal Yönetimi (Sadece Nick Arama)
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton()) {
-        // 1) 7/24 Ses Paneli Butonları
-        if (interaction.customId === 'swisty_bot_sese_kur') {
-            const modal = new ModalBuilder()
-                .setCustomId('modal_bot_sese_kur')
-                .setTitle('Kullanıcı Hesabını Sese Bırak');
-
-            const tokenInput = new TextInputBuilder()
-                .setCustomId('bot_tokens')
-                .setLabel('Hesap Token(leri) - Alt alta yazın')
-                .setStyle(TextInputStyle.Paragraph)
-                .setPlaceholder('Kullanıcı tokenlerini buraya yapıştırın')
-                .setRequired(true);
-
-            const channelInput = new TextInputBuilder()
-                .setCustomId('voice_channel_id')
-                .setLabel('Ses Kanal ID')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Girilecek ses kanalının IDsi')
-                .setRequired(true);
-
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(tokenInput),
-                new ActionRowBuilder().addComponents(channelInput)
-            );
-
-            await interaction.showModal(modal);
-        }
-
-        if (interaction.customId === 'swisty_aktif_botlar') {
-            await interaction.reply({ content: `📊 Sistemde sese bağlı aktif hesap sayısı: **${activeVoiceSessions.size}**`, flags: [64] });
-        }
-
-        if (interaction.customId === 'swisty_baglantiyi_kes') {
-            let count = 0;
-            for (const [token, data] of activeVoiceSessions.entries()) {
-                try {
-                    data.connection.destroy();
-                    data.client.destroy();
-                    count++;
-                } catch (e) {}
-            }
-            activeVoiceSessions.clear();
-            await interaction.reply({ content: `🔴 Toplam **${count}** adet hesabın ses bağlantısı sonlandırıldı.`, flags: [64] });
-        }
-
-        // 2) Nick Bulucu Butonu
         if (interaction.customId === 'swisty_nick_ara') {
             const modal = new ModalBuilder()
                 .setCustomId('modal_nick_ara')
@@ -199,66 +149,6 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
-        // Ses Paneli Form Gönderimi
-        if (interaction.customId === 'modal_bot_sese_kur') {
-            const tokenText = interaction.fields.getTextInputValue('bot_tokens');
-            const channelId = interaction.fields.getTextInputValue('voice_channel_id');
-            const guild = interaction.guild;
-
-            const targetChannel = guild.channels.cache.get(channelId);
-            if (!targetChannel) {
-                return await interaction.reply({ content: '❌ Hata: Belirttiğiniz ID geçerli bir ses kanalı değil!', flags: [64] });
-            }
-
-            const tokens = tokenText.split('\n').map(t => t.trim()).filter(t => t.length > 0);
-
-            if (tokens.length === 0) {
-                return await interaction.reply({ content: '❌ Geçerli bir token bulunamadı!', flags: [64] });
-            }
-
-            await interaction.reply({ content: `⏳ Girilen **${tokens.length}** adet kullanıcı hesabı <#${channelId}> kanalına bağlanıyor...`, flags: [64] });
-
-            let successCount = 0;
-
-            for (const token of tokens) {
-                try {
-                    const userClient = new SelfClient({
-                        checkUpdate: false,
-                        intents: []
-                    });
-
-                    userClient.once('ready', async () => {
-                        try {
-                            setTimeout(async () => {
-                                const connection = joinVoiceChannel({
-                                    channelId: targetChannel.id,
-                                    guildId: guild.id,
-                                    adapterCreator: targetChannel.guild.voiceAdapterCreator,
-                                    selfDeaf: true,
-                                    selfMute: true
-                                });
-
-                                await entersState(connection, VoiceConnectionStatus.Ready, 20 * 1000);
-                                console.log(`[7/24 KULLANICI SES] ${userClient.user.tag} sese başarıyla bağlandı!`);
-                                
-                                activeVoiceSessions.set(token, { client: userClient, connection });
-                            }, 2000);
-                        } catch (err) {
-                            console.error(`[HATA] Kullanıcı sese bağlanamadı:`, err.message);
-                        }
-                    });
-
-                    await userClient.login(token);
-                    successCount++;
-                } catch (err) {
-                    console.error('Kullanıcı token giriş hatası:', err.message);
-                }
-            }
-
-            await interaction.editReply({ content: `✅ İşlem tamamlandı! Toplam **${successCount}** kullanıcı hesabı sese yerleştirildi.` });
-        }
-
-        // Nick Bulucu Form Gönderimi
         if (interaction.customId === 'modal_nick_ara') {
             const raw = interaction.fields.getTextInputValue('nick_length').trim();
             const length = parseInt(raw, 10);
@@ -316,6 +206,6 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Bot Girişleri (Render ve `.env` ayarları için)
+// Bot Girişleri
 client.login(process.env.DISCORD_TOKEN);
 probeClient.login(process.env.PROBE_TOKEN);
