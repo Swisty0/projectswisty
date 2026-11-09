@@ -224,3 +224,20 @@ client.on('interactionCreate', async (interaction) => {
 
 // Bot Girişi
 client.login(process.env.DISCORD_TOKEN);
+// Discord istemcisi bağlantı kopmalarını ve hatalarını yakalama
+client.on('shardDisconnect', (event, id) => {
+    console.log(`⚠️ Uyarı: Bot bağlantısı kesildi (Shard ID: ${id}). Yeniden bağlanmaya çalışılıyor...`);
+});
+
+client.on('shardReconnecting', (id) => {
+    console.log(`🔄 Bilgi: Bot yeniden bağlanıyor... (Shard ID: ${id})`);
+});
+
+// Yakalanmayan hataların botu tamamen çökertmesini engellemek için
+process.on('unhandledRejection', error => {
+    console.error('Beklenmeyen Promise Hatası:', error);
+});
+
+process.on('uncaughtException', error => {
+    console.error('Kritik Hata (Uncaught Exception):', error);
+});
