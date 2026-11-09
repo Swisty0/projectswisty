@@ -6,7 +6,7 @@ module.exports = {
     async execute(message, args) {
         const embed = new EmbedBuilder()
             .setColor('#113ccf')
-            .setTitle('🔺 Project Swisty Nick Bulucu')
+            .setDescription('# 🔺 PROJECT SWİSTY NİCK BULUCU\n\n')
             .setDescription(
                 `🟢 **Durum:** \`Aktif / Hazır\`\n\n` +
                 `───────────────────────────────────\n\n` +
